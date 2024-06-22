@@ -1069,13 +1069,9 @@ def main(args):
                 f"`--conditioning_image_column` value '{args.conditioning_image_column}' not found in dataset columns. Dataset columns are: {', '.join(column_names)}"
             )
 
-    with accelerator.main_process_first():
-        train_dataset = dataset["train"].shuffle(seed=args.seed)
-        if args.max_train_samples is not None:
-            train_dataset = train_dataset.select(range(args.max_train_samples))
-
     # Preprocessing the datasets.
-    def tokenize_captions(examples, tokenizer_one, tokenizer_two, is_train=True):
+    # We need to tokenize input captions and transform the images.
+    def tokenize_captions(examples, is_train=True):
         captions = []
         for caption in examples[caption_column]:
             if isinstance(caption, str):
@@ -1091,7 +1087,18 @@ def main(args):
         tokens_two = tokenize_prompt(tokenizer_two, captions)
         return tokens_one, tokens_two
 
-    def preprocess_train(examples, tokenizer_one, tokenizer_two):
+    # Preprocessing the datasets.
+    train_resize = transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR)
+    train_crop = transforms.CenterCrop(args.resolution) if args.center_crop else transforms.RandomCrop(args.resolution)
+    train_flip = transforms.RandomHorizontalFlip(p=1.0)
+    train_transforms = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ]
+    )
+
+    def preprocess_train(examples):
         images = [image.convert("RGB") for image in examples[image_column]]
         # image aug
         original_sizes = []
@@ -1118,7 +1125,7 @@ def main(args):
         examples["original_sizes"] = original_sizes
         examples["crop_top_lefts"] = crop_top_lefts
         examples["pixel_values"] = all_images
-        tokens_one, tokens_two = tokenize_captions(examples, tokenizer_one, tokenizer_two)
+        tokens_one, tokens_two = tokenize_captions(examples)
         examples["input_ids_one"] = tokens_one
         examples["input_ids_two"] = tokens_two
         if args.debug_loss:
@@ -1129,10 +1136,10 @@ def main(args):
 
     with accelerator.main_process_first():
         if args.max_train_samples is not None:
-            train_dataset = train_dataset.shuffle(seed=args.seed).select(range(args.max_train_samples))
+            dataset["train"] = dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
         # Set the training transforms
-        train_dataset = train_dataset.with_transform(lambda examples: preprocess_train(examples, tokenizer_one, tokenizer_two), output_all_columns=True)
-
+        train_dataset = dataset["train"].with_transform(preprocess_train, output_all_columns=True)
+        
     def collate_fn(examples):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
