@@ -1220,7 +1220,15 @@ def main(args):
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("text2image-fine-tune", config=vars(args))
+        tracker_config = dict(vars(args))
+
+        # tensorboard cannot handle list types for config
+        tracker_config.pop("validation_prompt")
+        tracker_config.pop("validation_image")
+
+        # Remove None values
+        tracker_config = {k: v for k, v in tracker_config.items() if v is not None}
+        accelerator.init_trackers("controlnet-lora-fine-tune", config=tracker_config)
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -1329,7 +1337,7 @@ def main(args):
                     text_input_ids_list=[batch["input_ids_one"], batch["input_ids_two"]],
                 )
                 
-                controlnet_conditions = controlnet(noisy_model_input, timesteps, encoder_hidden_states=prompt_embeds, controlnet_cond=batch["conditioning_image_column"])
+                controlnet_conditions = controlnet(noisy_model_input, timesteps, encoder_hidden_states=prompt_embeds, controlnet_cond=batch["conditioning_pixel_values"])
                 # Predict the noise residual
                 unet_added_conditions = {"time_ids": add_time_ids}
                 unet_added_conditions = {"time_ids": add_time_ids, "controlnet_conditions": controlnet_conditions}
