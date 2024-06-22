@@ -1097,9 +1097,20 @@ def main(args):
             transforms.Normalize([0.5], [0.5]),
         ]
     )
+    conditioning_image_transforms = transforms.Compose(
+        [
+            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(args.resolution),
+            transforms.ToTensor(),
+        ]
+    )
 
     def preprocess_train(examples):
         images = [image.convert("RGB") for image in examples[image_column]]
+
+        conditioning_images = [image.convert("RGB") for image in examples[args.conditioning_image_column]]
+        conditioning_images = [conditioning_image_transforms(image) for image in conditioning_images]
+
         # image aug
         original_sizes = []
         all_images = []
@@ -1125,6 +1136,7 @@ def main(args):
         examples["original_sizes"] = original_sizes
         examples["crop_top_lefts"] = crop_top_lefts
         examples["pixel_values"] = all_images
+        examples["conditioning_pixel_values"] = conditioning_images
         tokens_one, tokens_two = tokenize_captions(examples)
         examples["input_ids_one"] = tokens_one
         examples["input_ids_two"] = tokens_two
@@ -1145,10 +1157,15 @@ def main(args):
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
         original_sizes = [example["original_sizes"] for example in examples]
         crop_top_lefts = [example["crop_top_lefts"] for example in examples]
+
+        conditioning_pixel_values = torch.stack([example["conditioning_pixel_values"] for example in examples])
+        conditioning_pixel_values = conditioning_pixel_values.to(memory_format=torch.contiguous_format).float()
+    
         input_ids_one = torch.stack([example["input_ids_one"] for example in examples])
         input_ids_two = torch.stack([example["input_ids_two"] for example in examples])
         result = {
             "pixel_values": pixel_values,
+            "conditioning_pixel_values": conditioning_pixel_values,
             "input_ids_one": input_ids_one,
             "input_ids_two": input_ids_two,
             "original_sizes": original_sizes,
@@ -1312,8 +1329,7 @@ def main(args):
                     text_input_ids_list=[batch["input_ids_one"], batch["input_ids_two"]],
                 )
                 
-                controlnet_conditions = controlnet(noisy_model_input, timesteps, encoder_hidden_states=prompt_embeds)
-                
+                controlnet_conditions = controlnet(noisy_model_input, timesteps, encoder_hidden_states=prompt_embeds, controlnet_cond=batch["conditioning_image_column"])
                 # Predict the noise residual
                 unet_added_conditions = {"time_ids": add_time_ids}
                 unet_added_conditions = {"time_ids": add_time_ids, "controlnet_conditions": controlnet_conditions}
