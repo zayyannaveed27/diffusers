@@ -1304,17 +1304,20 @@ def main(args):
                 add_time_ids = torch.cat(
                     [compute_time_ids(s, c) for s, c in zip(batch["original_sizes"], batch["crop_top_lefts"])]
                 )
-                controlnet_conditions = controlnet(noisy_model_input, timesteps, encoder_hidden_states=prompt_embeds)
-                
-                # Predict the noise residual
-                unet_added_conditions = {"time_ids": add_time_ids}
-                unet_added_conditions = {"time_ids": add_time_ids, "controlnet_conditions": controlnet_conditions}
+
                 prompt_embeds, pooled_prompt_embeds = encode_prompt(
                     text_encoders=[text_encoder_one, text_encoder_two],
                     tokenizers=None,
                     prompt=None,
                     text_input_ids_list=[batch["input_ids_one"], batch["input_ids_two"]],
                 )
+                
+                controlnet_conditions = controlnet(noisy_model_input, timesteps, encoder_hidden_states=prompt_embeds)
+                
+                # Predict the noise residual
+                unet_added_conditions = {"time_ids": add_time_ids}
+                unet_added_conditions = {"time_ids": add_time_ids, "controlnet_conditions": controlnet_conditions}
+                
                 unet_added_conditions.update({"text_embeds": pooled_prompt_embeds})
                 model_pred = unet(
                     noisy_model_input,
